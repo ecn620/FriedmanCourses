@@ -927,11 +927,11 @@ function Plan(props) {
             <p style={{ fontSize: 12.5, color: t.slate, marginTop: 0 }}>Choose a name and passcode. You'll re-enter both on the first screen to reload this plan.</p>
             <div style={{ display: "grid", gap: 8 }}>
               <Field label="Your name" style={{ margin: 0 }}><input value={name} onChange={(e) => setName(e.target.value)} placeholder="First Last" style={input} /></Field>
-              <Field label="Passcode (pick anything you'll remember)" style={{ margin: 0 }}><input value={passcode} onChange={(e) => setPasscode(e.target.value)} type="password" placeholder="e.g. maple-123" style={input} /></Field>
+              <Field label="Passcode" style={{ margin: 0 }}><input value={passcode} onChange={(e) => setPasscode(e.target.value)} type="password" placeholder="e.g. maple-123" style={input} /></Field>
               <button onClick={savePlan} style={{ ...primaryBtn, marginTop: 2, padding: "10px" }}><Save size={14} style={{ verticalAlign: -2, marginRight: 6 }} />Save plan</button>
             </div>
             <p style={{ fontSize: 11.5, color: t.slate, marginTop: 10, lineHeight: 1.5 }}>
-              This web page will store your data and your advisor will be able to see this. Make sure you aren't sharing sensitive information, as this is not a secure portal.
+              This web page will store your data and your advisor will be able to see your password. Make sure you aren't sharing sensitive information, as this is not a secure portal.
             </p>
           </div>
         </div>
