@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Friedman MS Degree Planner</title>
+    <meta name="description" content="Plan your Tufts Friedman School MS course of study and check degree requirements." />
+    <style>
+      html, body { margin: 0; padding: 0; background: #f4f2ec; }
+      * { box-sizing: border-box; }
+      #root { min-height: 100vh; }
+      /* graceful message if JS is disabled */
+      .nojs { font-family: Georgia, serif; color: #16334f; padding: 40px; max-width: 640px; margin: 0 auto; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <noscript><div class="nojs">This planner needs JavaScript enabled in your browser.</div></noscript>
+    </div>
+    <script>
+      /* OPTIONAL: shared plan server (makes save/load work across devices and
+         lets the advisor view collect every student's plan).
+         1. Follow SERVER_SETUP.md to deploy the free Google Apps Script.
+         2. Paste its web-app URL between the quotes below. It looks like
+            https://script.google.com/macros/s/XXXX/exec
+         Leave "" to keep the old behavior (plans save per-browser only). */
+      window.FRIEDMAN_SYNC_URL = "https://script.google.com/macros/s/AKfycbzOea_bkRZWawPzDAGJXUFmFIMYrQqAAhCN-zaDh7TfzyPLpsMjLmuRYsCCdsMjUSWc/exec";
+    </script>
+    <script src="./app.js"></script>
+  </body>
+</html>
