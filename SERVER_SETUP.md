@@ -22,10 +22,9 @@ cost, no accounts for students.
 2. In the sheet, open **Extensions → Apps Script**. Delete the placeholder
    code and paste in the full contents of `friedman-plan-server.gs`.
 
-3. In the pasted code, check the line near the top:
-   `const ADVISOR_KEY = "friedman-advisor";`
-   It must match `ADVISOR_PASSCODE` near the top of `friedman-planner.jsx`.
-   If you change one, change both.
+3. Select **setup** in the function menu at the top of the editor and click
+   **Run** (authorize when prompted). This creates the Advisors and Config tabs
+   and logs the **faculty setup code** (also in cell B1 of the Config tab).
 
 4. Click **Deploy → New deployment**. Choose type **Web app** and set:
    - Description: anything
@@ -36,8 +35,8 @@ cost, no accounts for students.
 
    "Anyone" here means anyone with the URL can call the save/load API — it
    does not expose your Google account or the rest of your Drive. Loading a
-   plan still requires the student's name + passcode, and listing all plans
-   requires the advisor passcode.
+   plan requires the student's name + passcode, and listing plans requires
+   an advisor password.
 
 5. Open `index.html` in your repo and paste the URL into the marked line:
    `window.FRIEDMAN_SYNC_URL = "https://script.google.com/macros/s/XXXX/exec";`
@@ -49,10 +48,30 @@ cost, no accounts for students.
 - **Save plan** writes to the shared sheet (and keeps a local copy). Students
   can reload from any browser or device with their name + passcode.
 - **Load** checks the server first, then falls back to the browser's copy.
-- **Advisor view** lists every plan on the server, merged with any saved in
-  your own browser; the newest copy of each student wins. Each row in your
-  Google Sheet is one student's latest plan, so you also have a spreadsheet
-  view of who has saved.
+- **Advisor view** asks each advisor to pick their name and log in with their
+  own password, then lists only the plans of students who selected them.
+  Each row in the Plans tab is one student's latest plan; the advisor column
+  shows who it belongs to.
+
+## Advisors
+
+- The advisor list lives in `ADVISORS` at the top of both
+  `friedman-planner.jsx` and `friedman-plan-server.gs`. Keep the ids in sync.
+  To add an advisor, add them to both, rebuild `app.js`, and redeploy the
+  script as a new version.
+- Each advisor creates their own password in the app (Advisor view, "Create
+  my password"). They need the faculty setup code from the Config tab. Send
+  it privately; don't post it anywhere public.
+- The sheet stores only a salted hash of each advisor password, so nobody can
+  read it back.
+- To reset a forgotten password, clear that advisor's `password_hash` and
+  `salt` cells in the Advisors tab. They can then create a new one.
+- To change the setup code, edit Config!B1 (or clear it and a new one is
+  generated).
+- Plans saved before advisors existed belong to `DEFAULT_ADVISOR`
+  (Erin). A student can switch advisors at any time by saving again.
+- A saved plan can only be overwritten with its passcode, so one student
+  can't overwrite another by typing the same name.
 
 If the URL is left blank, everything behaves as before (per-browser saving),
 and the app now says so explicitly next to the Save button.
@@ -67,7 +86,8 @@ new deployment generates a new URL, which would need pasting into
 ## Honest limits
 
 This is convenience-level protection suited to course plans, not a secure
-portal: passcodes are stored in your sheet in plain text and the API is
-reachable by anyone with the URL. The app tells students to pick a throwaway
+portal: student passcodes are stored in your sheet in plain text, the sheet
+owner can see every advisor's students, and the API is reachable by anyone
+with the URL. The app tells students to pick a throwaway
 passcode and avoid sensitive information. If a student forgets their
 passcode, you can read or edit it directly in the sheet.

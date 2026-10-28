@@ -11,17 +11,23 @@ import {
    Build:  npx esbuild friedman-planner.jsx --bundle --minify --format=iife \
              --jsx=automatic --define:process.env.NODE_ENV=\"production\" --outfile=app.js
    ADVISOR settings:
-   1) ADVISOR_EMAIL    – where the "email my plan" button sends to.
-   2) ADVISOR_PASSCODE – the code for the advisor view (must match ADVISOR_KEY
-                         in friedman-plan-server.gs).
+   1) ADVISORS – names, emails, and ids for the advisor drop-down. Keep the ids
+                 in sync with ADVISORS in friedman-plan-server.gs.
+   2) Advisor passwords live only on the server (hashed in the Advisors tab).
    3) Shared plan server URL lives in index.html (window.FRIEDMAN_SYNC_URL).
    Course data: AY2026-27 offerings spreadsheet is the source of truth.
    Prerequisites: nutrition.tufts.edu/student-experience/registrar/prerequisites
    This is a planning aid, not an official degree audit.
    ========================================================================== */
 
-const ADVISOR_EMAIL = "erin.coughlan@tufts.edu";
-const ADVISOR_PASSCODE = "friedman-advisor";
+const ADVISORS = [
+  { id: "blackstone", name: "Nicole Tichenor Blackstone", email: "Nicole.Blackstone@tufts.edu" },
+  { id: "coughlan", name: "Erin Coughlan de Perez", email: "erin.coughlan@tufts.edu" },
+  { id: "masters", name: "William Masters", email: "William.Masters@tufts.edu" },
+];
+// Plans saved before advisors existed belong to this advisor.
+const DEFAULT_ADVISOR = "coughlan";
+const advisorById = (id) => ADVISORS.find((a) => a.id === id) || null;
 const SYNC_URL = (typeof window !== "undefined" && window.FRIEDMAN_SYNC_URL) || "";
 const EL_HOURS = 120;
 
@@ -528,10 +534,10 @@ async function serverLoad(name, pass) {
     return await r.json();
   } catch (e) { return { ok: false, error: "could not reach the plan server" }; }
 }
-async function serverList(key) {
-  if (!SYNC_URL) return { ok: false, off: true };
+async function serverPost(body) {
+  if (!SYNC_URL) return { ok: false, off: true, error: "no shared plan server is configured" };
   try {
-    const r = await fetch(`${SYNC_URL}?action=list&key=${encodeURIComponent(key)}`, { redirect: "follow" });
+    const r = await fetch(SYNC_URL, { method: "POST", redirect: "follow", body: JSON.stringify(body) });
     return await r.json();
   } catch (e) { return { ok: false, error: "could not reach the plan server" }; }
 }
@@ -587,6 +593,7 @@ export default function App() {
   const [program, setProgram] = useState("online");
   const [name, setName] = useState("");
   const [passcode, setPasscode] = useState("");
+  const [advisor, setAdvisor] = useState("");
   const [startTerm, setStartTerm] = useState("Fall");
   const [startYear, setStartYear] = useState(String(new Date().getFullYear()));
   const [intl, setIntl] = useState(false);
@@ -612,6 +619,7 @@ export default function App() {
 
   function beginPlanning() {
     if (!name.trim()) { setToast("Enter your name to continue."); return; }
+    if (!advisorById(advisor)) { setToast("Select your advisor to continue."); return; }
     const sems = buildSemesters(startTerm, startYear);
     setSemesters(sems);
     setPlaced((p) => (Object.keys(p).length ? p : sems.reduce((a, s) => ((a[s.id] = []), a), {})));
@@ -671,9 +679,10 @@ export default function App() {
     if (!name.trim()) { setToast("Add your name first."); return; }
     if (!passcode.trim()) { setToast("Set a passcode so you can reload later."); return; }
     if (passcode !== passcode2) { setToast("Passcodes don't match — re-enter them in both boxes."); return; }
+    if (!advisorById(advisor)) { setToast("Select your advisor before saving."); return; }
     const key = `plan:${slug(name)}`;
     const record = {
-      name, passcode, program, startTerm, startYear, intl, specs, semesters, placed,
+      name, passcode, advisor, program, startTerm, startYear, intl, specs, semesters, placed,
       expEntries, thesis, priorCourses, comments, wishlist, prereqChecks,
       savedAt: new Date().toISOString(),
     };
@@ -681,9 +690,11 @@ export default function App() {
     if (!SYNC_URL) { setToast("Plan saved in this browser only. Email or download it to share it — or ask your advisor to enable the shared plan server."); return; }
     const res = await serverSave(record);
     if (res.ok) setToast("Plan saved. You can reload it from any browser with your name + passcode.");
+    else if (res.error === "name_taken") setToast("A saved plan already uses this name with a different passcode. Load it with the original passcode, or add a middle initial to your name.");
     else setToast(`Saved in this browser, but the shared server failed (${res.error}). Try again, or email your plan.`);
   }
   function applyRecord(rec) {
+    setAdvisor(advisorById(rec.advisor) ? rec.advisor : DEFAULT_ADVISOR);
     setProgram(rec.program); setStartTerm(rec.startTerm); setStartYear(rec.startYear);
     setIntl(!!rec.intl); setSpecs(rec.specs || []); setSemesters(rec.semesters || []);
     setPlaced(rec.placed || {});
@@ -722,6 +733,7 @@ export default function App() {
   function planText() {
     const lines = [];
     lines.push(`Friedman MS plan — ${name}`);
+    if (advisorById(advisor)) lines.push(`Advisor: ${advisorById(advisor).name}`);
     lines.push(`Program: ${program === "online" ? "Online MS (30 cr)" : "On-campus MS (48 cr)"}`);
     lines.push(`Started: ${startTerm} ${startYear}${intl ? " · international student" : ""}`);
     lines.push(`Specialization(s): ${specs.join("; ") || "—"}`);
@@ -767,7 +779,8 @@ export default function App() {
   function mailtoHref() {
     const subject = encodeURIComponent(`Friedman MS plan — ${name || "student"}`);
     const body = encodeURIComponent("Hi,\n\nPlease find my degree plan below.\n\n----------------------------------------\n" + planText());
-    return `mailto:${ADVISOR_EMAIL}?subject=${subject}&body=${body}`;
+    const adv = advisorById(advisor);
+    return `mailto:${adv ? adv.email : ""}?subject=${subject}&body=${body}`;
   }
   function planHtml() {
     const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -826,10 +839,10 @@ ${preRows ? `<h3 style="color:#b06a12">Prerequisites to check</h3><ul>${preRows}
       <Header screen={screen} setScreen={setScreen} />
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 16px 64px" }}>
         {screen === "setup" && (
-          <Setup {...{ program, setProgram, name, setName, passcode, setPasscode, startTerm, setStartTerm, startYear, setStartYear, intl, setIntl, specs, setSpecs, specOptions, specLimit, beginPlanning, loadPlan, loadMsg }} />
+          <Setup {...{ program, setProgram, name, setName, passcode, setPasscode, advisor, setAdvisor, startTerm, setStartTerm, startYear, setStartYear, intl, setIntl, specs, setSpecs, specOptions, specLimit, beginPlanning, loadPlan, loadMsg }} />
         )}
         {screen === "plan" && (
-          <Plan {...{ program, name, setName, passcode, setPasscode, passcode2, setPasscode2, comments, setComments, specs, setSpecs, specOptions, specLimit, creditTarget, semesters, setSemesters, placed, setPlaced, placedCodes, addToSemester, removeFromPlan, dragCode, activeSem, setActiveSem, analysis, expEntries, setExpEntries, expHours, expDone, thesis, setThesis, priorCourses, setPriorCourses, wishlist, setWishlist, toggleWish, togglePrereqCheck, savePlan, mailtoHref, downloadPlan, intl }} />
+          <Plan {...{ program, name, setName, passcode, setPasscode, advisor, setAdvisor, passcode2, setPasscode2, comments, setComments, specs, setSpecs, specOptions, specLimit, creditTarget, semesters, setSemesters, placed, setPlaced, placedCodes, addToSemester, removeFromPlan, dragCode, activeSem, setActiveSem, analysis, expEntries, setExpEntries, expHours, expDone, thesis, setThesis, priorCourses, setPriorCourses, wishlist, setWishlist, toggleWish, togglePrereqCheck, savePlan, mailtoHref, downloadPlan, intl }} />
         )}
         {screen === "advisor" && <Advisor />}
       </div>
@@ -872,7 +885,7 @@ const ghostBtn = { background: "rgba(255,255,255,.12)", color: "#fff", border: "
 
 /* ---------------------------------- Setup ---------------------------------- */
 function Setup(props) {
-  const { program, setProgram, name, setName, passcode, setPasscode, startTerm, setStartTerm, startYear, setStartYear, intl, setIntl, specs, setSpecs, specOptions, specLimit, beginPlanning, loadPlan, loadMsg } = props;
+  const { program, setProgram, name, setName, passcode, setPasscode, advisor, setAdvisor, startTerm, setStartTerm, startYear, setStartYear, intl, setIntl, specs, setSpecs, specOptions, specLimit, beginPlanning, loadPlan, loadMsg } = props;
   function toggleSpec(s) { setSpecs((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s])); }
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr)", gap: 20, paddingTop: 26 }}>
@@ -892,6 +905,7 @@ function Setup(props) {
           </Field>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 14 }}>
             <Field label="Your name"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="First Last" style={input} /></Field>
+            <Field label="Your advisor"><AdvisorSelect value={advisor} onChange={setAdvisor} /></Field>
             <Field label="Starting term">
               <div style={{ display: "flex", gap: 8 }}>
                 <select value={startTerm} onChange={(e) => setStartTerm(e.target.value)} style={{ ...input, flex: 1 }}>
@@ -962,7 +976,7 @@ function useDragAutoScroll(active) {
 }
 
 function Plan(props) {
-  const { program, name, setName, passcode, setPasscode, passcode2, setPasscode2, comments, setComments, specs, setSpecs, specOptions, specLimit, creditTarget, semesters, setSemesters, placed, setPlaced, placedCodes, addToSemester, removeFromPlan, dragCode, activeSem, setActiveSem, analysis, expEntries, setExpEntries, expHours, expDone, thesis, setThesis, priorCourses, setPriorCourses, wishlist, setWishlist, toggleWish, togglePrereqCheck, savePlan, mailtoHref, downloadPlan } = props;
+  const { program, name, setName, passcode, setPasscode, advisor, setAdvisor, passcode2, setPasscode2, comments, setComments, specs, setSpecs, specOptions, specLimit, creditTarget, semesters, setSemesters, placed, setPlaced, placedCodes, addToSemester, removeFromPlan, dragCode, activeSem, setActiveSem, analysis, expEntries, setExpEntries, expHours, expDone, thesis, setThesis, priorCourses, setPriorCourses, wishlist, setWishlist, toggleWish, togglePrereqCheck, savePlan, mailtoHref, downloadPlan } = props;
 
   const [q, setQ] = useState("");
   const [modeFilter, setModeFilter] = useState("all");
@@ -1170,7 +1184,7 @@ function Plan(props) {
                 <Save size={14} style={{ verticalAlign: -2, marginRight: 6 }} />Download (Word)
               </button>
             </div>
-            <p style={{ fontSize: 11, color: t.faint, marginTop: 8 }}>If the email button doesn't open your mail app, download the Word copy and attach it to an email instead.</p>
+            <p style={{ fontSize: 11, color: t.faint, marginTop: 8 }}>{advisorById(advisor) ? `The email goes to ${advisorById(advisor).name} (${advisorById(advisor).email}). ` : "Select your advisor under Save to address the email. "}If the email button doesn't open your mail app, download the Word copy and attach it to an email instead.</p>
           </div>
 
           <div style={panel}>
@@ -1178,6 +1192,7 @@ function Plan(props) {
             <p style={{ fontSize: 12.5, color: t.slate, marginTop: 0 }}>Choose a name and passcode. You'll re-enter both on the first screen to reload this plan.</p>
             <div style={{ display: "grid", gap: 8 }}>
               <Field label="Your name" style={{ margin: 0 }}><input value={name} onChange={(e) => setName(e.target.value)} placeholder="First Last" style={input} /></Field>
+              <Field label="Your advisor" style={{ margin: 0 }}><AdvisorSelect value={advisor} onChange={setAdvisor} /></Field>
               <Field label="Passcode (pick anything you'll remember)" style={{ margin: 0 }}><PassInput value={passcode} onChange={(e) => setPasscode(e.target.value)} placeholder="e.g. maple-123" /></Field>
               <Field label="Re-enter passcode" style={{ margin: 0 }}><PassInput value={passcode2} onChange={(e) => setPasscode2(e.target.value)} placeholder="type it again" /></Field>
               {passcode && passcode2 && passcode !== passcode2 && <p style={{ color: t.bad, fontSize: 12, margin: 0 }}>Passcodes don't match yet.</p>}
@@ -1185,7 +1200,7 @@ function Plan(props) {
             </div>
             <p style={{ fontSize: 11.5, color: t.slate, marginTop: 10, lineHeight: 1.5 }}>
               {SYNC_URL
-                ? "Plans save to a shared class server: reload from any device with your name + passcode, and your advisor can see them. Pick a simple passcode — never reuse a real password. This is not a secure portal, so don't include sensitive information."
+                ? "Plans save to a shared server run by Friedman faculty: reload from any device with your name + passcode. Your advisor sees your plan, and the faculty member who runs the server can see all plans. Pick a simple passcode and never reuse a real password. This is not a secure or private portal, so don't include sensitive information."
                 : "Right now plans save only in this browser on this device, and the advisor view only sees plans saved here. Email or download your plan to share it. Don't include sensitive information — this is not a secure portal."}
             </p>
           </div>
@@ -1643,49 +1658,126 @@ function PriorCourses({ priorCourses, setPriorCourses, specs }) {
 }
 
 /* --------------------------------- Advisor --------------------------------- */
+function AdvisorSelect({ value, onChange }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ ...input, color: value ? t.ink : t.faint }}>
+      <option value="">Select your advisor…</option>
+      {ADVISORS.map((a) => <option key={a.id} value={a.id} style={{ color: t.ink }}>{a.name}</option>)}
+    </select>
+  );
+}
+
 function Advisor() {
   const [unlocked, setUnlocked] = useState(false);
+  const [advisorId, setAdvisorId] = useState("");
+  const [mode, setMode] = useState("login"); // login | create
+  const [hasPw, setHasPw] = useState(null); // { id: bool } from the server
   const [code, setCode] = useState("");
+  const [code2, setCode2] = useState("");
+  const [setupCode, setSetupCode] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const [plans, setPlans] = useState([]);
   const [openId, setOpenId] = useState(null);
   const [srcNote, setSrcNote] = useState("");
 
-  async function unlock() {
-    if (code !== ADVISOR_PASSCODE) { setPlans([{ error: "Wrong passcode." }]); return; }
-    setUnlocked(true);
-    const res = await store.list("plan:", true);
-    const keys = (res && res.keys) || [];
-    const local = [];
-    for (const k of keys) {
-      const r = await store.get(k, true);
-      if (r && r.value) { try { local.push({ key: k, ...JSON.parse(r.value) }); } catch (e) {} }
-    }
-    let out = local, note = "";
-    if (SYNC_URL) {
-      const sv = await serverList(code);
-      if (sv.ok && Array.isArray(sv.plans)) {
-        const byName = {};
-        [...sv.plans.map((p) => ({ key: "srv:" + slug(p.name || ""), ...p })), ...local].forEach((p) => {
-          const k = slug(p.name || "") || p.key;
-          if (!byName[k] || (p.savedAt || "") > (byName[k].savedAt || "")) byName[k] = p;
-        });
-        out = Object.values(byName);
-        note = `${sv.plans.length} plan(s) from the shared server` + (local.length ? `, merged with ${local.length} saved in this browser (newest copy kept).` : ".");
-      } else note = `Couldn't reach the shared plan server (${sv.error || "unknown error"}) — showing only plans saved in this browser.`;
-    } else note = "No shared plan server is configured, so this list only shows plans saved in this same browser. See SERVER_SETUP.md to enable collecting plans from all students.";
-    out.sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
-    setPlans(out); setSrcNote(note);
+  useEffect(() => {
+    if (!SYNC_URL) return;
+    serverPost({ action: "advisorStatus" }).then((r) => { if (r && r.ok) setHasPw(r.hasPassword || {}); });
+  }, []);
+  function pickAdvisor(id) {
+    setAdvisorId(id); setErr("");
+    if (hasPw && id in hasPw) setMode(hasPw[id] ? "login" : "create");
   }
 
+  async function fetchPlans(id, pw) {
+    const sv = await serverPost({ action: "advisorList", advisor: id, password: pw });
+    if (!sv.ok) return sv;
+    // Merge in any copies saved in this browser for the same advisor (newest wins).
+    const res = await store.list("plan:", true);
+    const local = [];
+    for (const k of (res && res.keys) || []) {
+      const r = await store.get(k, true);
+      if (r && r.value) {
+        try {
+          const rec = JSON.parse(r.value);
+          if ((advisorById(rec.advisor) ? rec.advisor : DEFAULT_ADVISOR) === id) { delete rec.passcode; local.push({ key: k, ...rec }); }
+        } catch (e) {}
+      }
+    }
+    const byName = {};
+    [...(sv.plans || []).map((p) => ({ key: "srv:" + slug(p.name || ""), ...p })), ...local].forEach((p) => {
+      const k = slug(p.name || "") || p.key;
+      if (!byName[k] || (p.savedAt || "") > (byName[k].savedAt || "")) byName[k] = { ...p, key: "p:" + k };
+    });
+    const out = Object.values(byName).sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
+    setPlans(out);
+    setSrcNote(`${(sv.plans || []).length} plan(s) from the shared server` + (local.length ? `, merged with ${local.length} saved in this browser (newest copy kept).` : "."));
+    return { ok: true };
+  }
+
+  async function login() {
+    setErr("");
+    if (!SYNC_URL) { setErr("No shared plan server is configured, so advisor logins are unavailable. See SERVER_SETUP.md."); return; }
+    if (!advisorById(advisorId)) { setErr("Select your name."); return; }
+    if (!code) { setErr("Enter your password."); return; }
+    setBusy(true);
+    const r = await fetchPlans(advisorId, code);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || "Login failed."); return; }
+    setUnlocked(true);
+  }
+  async function createPassword() {
+    setErr("");
+    if (!SYNC_URL) { setErr("No shared plan server is configured, so advisor logins are unavailable. See SERVER_SETUP.md."); return; }
+    if (!advisorById(advisorId)) { setErr("Select your name."); return; }
+    if (code.length < 8) { setErr("Use at least 8 characters."); return; }
+    if (code !== code2) { setErr("Passwords don't match."); return; }
+    if (!setupCode.trim()) { setErr("Enter the faculty setup code."); return; }
+    setBusy(true);
+    const r = await serverPost({ action: "advisorSetup", advisor: advisorId, password: code, setupCode: setupCode.trim() });
+    if (!r.ok) { setBusy(false); setErr(r.error || "Could not create the password."); return; }
+    setHasPw((h) => ({ ...(h || {}), [advisorId]: true }));
+    const l = await fetchPlans(advisorId, code);
+    setBusy(false);
+    if (!l.ok) { setMode("login"); setErr(l.error || "Password created. Log in to continue."); return; }
+    setUnlocked(true);
+  }
+  function logout() { setUnlocked(false); setCode(""); setCode2(""); setSetupCode(""); setPlans([]); setOpenId(null); setErr(""); }
+
   if (!unlocked) {
+    const adv = advisorById(advisorId);
     return (
-      <div style={{ ...panel, maxWidth: 420, margin: "40px auto" }}>
+      <div style={{ ...panel, maxWidth: 440, margin: "40px auto" }}>
         <h2 style={h2}><Lock size={17} style={{ verticalAlign: -3, marginRight: 8 }} />Advisor view</h2>
-        <p style={{ color: t.slate, fontSize: 13.5, marginTop: -4 }}>Enter your advisor passcode to see saved student plans.</p>
-        <PassInput value={code} onChange={(e) => setCode(e.target.value)} placeholder="Passcode" onKeyDown={(e) => e.key === "Enter" && unlock()} />
-        {plans[0]?.error && <p style={{ color: t.bad, fontSize: 13, marginTop: 6 }}>{plans[0].error}</p>}
-        <button onClick={unlock} style={primaryBtn}>Open</button>
-        <p style={{ fontSize: 11.5, color: t.faint, marginTop: 12 }}>Change the passcode near the top of the code. Saved plans use the app's shared storage, so treat them as planning drafts rather than confidential records.</p>
+        <p style={{ color: t.slate, fontSize: 13.5, marginTop: -4 }}>Log in to see the plans of students who chose you as their advisor.</p>
+        <Field label="Advisor"><AdvisorSelect value={advisorId} onChange={pickAdvisor} /></Field>
+        <div style={{ display: "flex", gap: 6, margin: "4px 0 10px" }}>
+          {[["login", "Log in"], ["create", "Create my password"]].map(([m, label]) => (
+            <button key={m} onClick={() => { setMode(m); setErr(""); }} style={{ ...chip, background: mode === m ? t.navy : "#fff", color: mode === m ? "#fff" : t.ink, borderColor: mode === m ? t.navy : t.line }}>{label}</button>
+          ))}
+        </div>
+        {mode === "login" ? (
+          <>
+            <Field label="Password" style={{ margin: 0 }}><PassInput value={code} onChange={(e) => setCode(e.target.value)} placeholder="Your advisor password" onKeyDown={(e) => e.key === "Enter" && login()} /></Field>
+            {adv && hasPw && hasPw[advisorId] === false && <p style={{ fontSize: 12.5, color: t.attn, margin: "6px 0 0" }}>{adv.name} has no password yet. Choose "Create my password".</p>}
+            {err && <p style={{ color: t.bad, fontSize: 13, marginTop: 6 }}>{err}</p>}
+            <button onClick={login} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}>{busy ? "Checking…" : "Log in"}</button>
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: 12.5, color: t.slate, marginTop: 0 }}>First time here? Create your own password. You need the faculty setup code from Erin Coughlan de Perez. Don't reuse your Tufts password.</p>
+            <div style={{ display: "grid", gap: 8 }}>
+              <Field label="Faculty setup code" style={{ margin: 0 }}><PassInput value={setupCode} onChange={(e) => setSetupCode(e.target.value)} placeholder="From Erin" /></Field>
+              <Field label="New password (8+ characters)" style={{ margin: 0 }}><PassInput value={code} onChange={(e) => setCode(e.target.value)} /></Field>
+              <Field label="Re-enter password" style={{ margin: 0 }}><PassInput value={code2} onChange={(e) => setCode2(e.target.value)} onKeyDown={(e) => e.key === "Enter" && createPassword()} /></Field>
+            </div>
+            {adv && hasPw && hasPw[advisorId] === true && <p style={{ fontSize: 12.5, color: t.attn, margin: "6px 0 0" }}>{adv.name} already has a password. Log in instead, or ask Erin to reset it.</p>}
+            {err && <p style={{ color: t.bad, fontSize: 13, marginTop: 6 }}>{err}</p>}
+            <button onClick={createPassword} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}>{busy ? "Saving…" : "Create password and open"}</button>
+          </>
+        )}
+        <p style={{ fontSize: 11.5, color: t.faint, marginTop: 12 }}>Forgot your password? Ask Erin Coughlan de Perez to reset it. Treat saved plans as planning drafts, not confidential records.</p>
       </div>
     );
   }
@@ -1694,9 +1786,15 @@ function Advisor() {
   if (selected) return <WorksheetView rec={selected} onBack={() => setOpenId(null)} />;
   return (
     <div style={{ paddingTop: 24 }}>
-      <h2 style={h2}>Student plans <span style={{ fontSize: 14, color: t.slate }}>({real.length})</span></h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <h2 style={h2}>Advisees of {advisorById(advisorId)?.name} <span style={{ fontSize: 14, color: t.slate }}>({real.length})</span></h2>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={async () => { setBusy(true); await fetchPlans(advisorId, code); setBusy(false); }} style={{ ...secondaryBtn, padding: "6px 12px", fontSize: 13 }}>{busy ? "Refreshing…" : "Refresh"}</button>
+          <button onClick={logout} style={{ ...secondaryBtn, padding: "6px 12px", fontSize: 13 }}>Log out</button>
+        </div>
+      </div>
       {srcNote && <p style={{ fontSize: 12.5, color: t.slate, marginTop: -6 }}>{srcNote}</p>}
-      {!real.length && <div style={{ ...panel, color: t.slate }}>No saved plans yet. Once a student saves, their plan appears here.</div>}
+      {!real.length && <div style={{ ...panel, color: t.slate }}>No saved plans yet. Once a student who selects you as their advisor saves a plan, it appears here.</div>}
       <div style={{ display: "grid", gap: 10 }}>
         {real.map((p) => {
           const total = Object.values(p.placed || {}).flat().map(resolveCourse).filter(Boolean).reduce((s, c) => s + (c.cr || 0), 0);
