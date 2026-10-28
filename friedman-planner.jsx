@@ -11,8 +11,9 @@ import {
    Build:  npx esbuild friedman-planner.jsx --bundle --minify --format=iife \
              --jsx=automatic --define:process.env.NODE_ENV=\"production\" --outfile=app.js
    ADVISOR settings:
-   1) ADVISORS – names, emails, and ids for the advisor drop-down. Keep the ids
-                 in sync with ADVISORS in friedman-plan-server.gs.
+   1) Advisors – the drop-down loads names and emails from the Advisors tab of
+                 the plan server's Google Sheet. FALLBACK_ADVISORS below is
+                 used only if the server can't be reached.
    2) Advisor passwords live only on the server (hashed in the Advisors tab).
    3) Shared plan server URL lives in index.html (window.FRIEDMAN_SYNC_URL).
    Course data: AY2026-27 offerings spreadsheet is the source of truth.
@@ -20,14 +21,18 @@ import {
    This is a planning aid, not an official degree audit.
    ========================================================================== */
 
-const ADVISORS = [
+const FALLBACK_ADVISORS = [
   { id: "blackstone", name: "Nicole Tichenor Blackstone", email: "Nicole.Blackstone@tufts.edu" },
   { id: "coughlan", name: "Erin Coughlan de Perez", email: "erin.coughlan@tufts.edu" },
   { id: "masters", name: "William Masters", email: "William.Masters@tufts.edu" },
 ];
 // Plans saved before advisors existed belong to this advisor.
 const DEFAULT_ADVISOR = "coughlan";
-const advisorById = (id) => ADVISORS.find((a) => a.id === id) || null;
+let advisorList = FALLBACK_ADVISORS;
+const advisorById = (id) => advisorList.find((a) => a.id === id) || null;
+function setAdvisorList(list) {
+  if (Array.isArray(list) && list.length) advisorList = list.filter((a) => a && a.id && a.name);
+}
 const SYNC_URL = (typeof window !== "undefined" && window.FRIEDMAN_SYNC_URL) || "";
 const EL_HOURS = 120;
 
@@ -594,6 +599,13 @@ export default function App() {
   const [name, setName] = useState("");
   const [passcode, setPasscode] = useState("");
   const [advisor, setAdvisor] = useState("");
+  const [, setAdvisorsLoaded] = useState(0);
+  useEffect(() => {
+    if (!SYNC_URL) return;
+    serverPost({ action: "advisorStatus" }).then((r) => {
+      if (r && r.ok && r.advisors) { setAdvisorList(r.advisors); setAdvisorsLoaded((n) => n + 1); }
+    });
+  }, []);
   const [startTerm, setStartTerm] = useState("Fall");
   const [startYear, setStartYear] = useState(String(new Date().getFullYear()));
   const [intl, setIntl] = useState(false);
@@ -694,7 +706,7 @@ export default function App() {
     else setToast(`Saved in this browser, but the shared server failed (${res.error}). Try again, or email your plan.`);
   }
   function applyRecord(rec) {
-    setAdvisor(advisorById(rec.advisor) ? rec.advisor : DEFAULT_ADVISOR);
+    setAdvisor(rec.advisor || DEFAULT_ADVISOR);
     setProgram(rec.program); setStartTerm(rec.startTerm); setStartYear(rec.startYear);
     setIntl(!!rec.intl); setSpecs(rec.specs || []); setSemesters(rec.semesters || []);
     setPlaced(rec.placed || {});
@@ -1184,7 +1196,7 @@ function Plan(props) {
                 <Save size={14} style={{ verticalAlign: -2, marginRight: 6 }} />Download (Word)
               </button>
             </div>
-            <p style={{ fontSize: 11, color: t.faint, marginTop: 8 }}>{advisorById(advisor) ? `The email goes to ${advisorById(advisor).name} (${advisorById(advisor).email}). ` : "Select your advisor under Save to address the email. "}If the email button doesn't open your mail app, download the Word copy and attach it to an email instead.</p>
+            <p style={{ fontSize: 11, color: t.faint, marginTop: 8 }}>{advisorById(advisor) ? (advisorById(advisor).email ? `The email goes to ${advisorById(advisor).name} (${advisorById(advisor).email}). ` : `No email is on file for ${advisorById(advisor).name}, so add their address in your mail app. `) : "Select your advisor under Save to address the email. "}If the email button doesn't open your mail app, download the Word copy and attach it to an email instead.</p>
           </div>
 
           <div style={panel}>
@@ -1662,7 +1674,7 @@ function AdvisorSelect({ value, onChange }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} style={{ ...input, color: value ? t.ink : t.faint }}>
       <option value="">Select your advisor…</option>
-      {ADVISORS.map((a) => <option key={a.id} value={a.id} style={{ color: t.ink }}>{a.name}</option>)}
+      {advisorList.map((a) => <option key={a.id} value={a.id} style={{ color: t.ink }}>{a.name}</option>)}
     </select>
   );
 }
@@ -1683,7 +1695,7 @@ function Advisor() {
 
   useEffect(() => {
     if (!SYNC_URL) return;
-    serverPost({ action: "advisorStatus" }).then((r) => { if (r && r.ok) setHasPw(r.hasPassword || {}); });
+    serverPost({ action: "advisorStatus" }).then((r) => { if (r && r.ok) { setAdvisorList(r.advisors); setHasPw(r.hasPassword || {}); } });
   }, []);
   function pickAdvisor(id) {
     setAdvisorId(id); setErr("");
@@ -1701,7 +1713,7 @@ function Advisor() {
       if (r && r.value) {
         try {
           const rec = JSON.parse(r.value);
-          if ((advisorById(rec.advisor) ? rec.advisor : DEFAULT_ADVISOR) === id) { delete rec.passcode; local.push({ key: k, ...rec }); }
+          if ((rec.advisor || DEFAULT_ADVISOR) === id) { delete rec.passcode; local.push({ key: k, ...rec }); }
         } catch (e) {}
       }
     }

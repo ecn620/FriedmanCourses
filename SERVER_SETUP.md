@@ -55,10 +55,14 @@ cost, no accounts for students.
 
 ## Advisors
 
-- The advisor list lives in `ADVISORS` at the top of both
-  `friedman-planner.jsx` and `friedman-plan-server.gs`. Keep the ids in sync.
-  To add an advisor, add them to both, rebuild `app.js`, and redeploy the
-  script as a new version.
+- The **Advisors tab is the advisor list.** The app's drop-downs load it
+  every time the page opens. To add an advisor, add a row with their name in
+  column B and Tufts email in column C, leaving column A (id) blank. The
+  script fills in the id the first time it reads the row. No code changes or
+  redeploys needed.
+- Don't edit an advisor's id once it exists. Students' plans point to it.
+- To remove an advisor, delete their row. Their students will be asked to
+  pick a new advisor the next time they save.
 - Each advisor creates their own password in the app (Advisor view, "Create
   my password"). They need the faculty setup code from the Config tab. Send
   it privately; don't post it anywhere public.
